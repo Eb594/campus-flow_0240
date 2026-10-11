@@ -18,102 +18,104 @@ def main():
     try:
         manager = TicketManager()
     except (ValueError, OSError) as error:
-        print(f"\nCould not start Campus Flow: {error}")
+        print(f"Could not load tickets: {error}")
         return
 
     while True:
         print("\n===== CAMPUS FLOW =====")
-        print("1. Create a ticket")
+        print("1. Create ticket")
         print("2. View all tickets")
         print("3. Search tickets")
         print("4. Assign a ticket")
         print("5. View work queue")
-        print("6. Exit")
+        print("6. Update ticket status")
+        print("7. Generate ticket report")
+        print("8. Exit")
 
-        choice = input("Choose an option: ").strip()
+        choice = input("Choose an option (1-8): ").strip()
 
-        # F1: Create a ticket
-        if choice == "1":
-            title = input("Enter ticket title: ")
-            description = input("Enter ticket description: ")
+        try:
+            if choice == "1":
+                title = input("Enter ticket title: ")
+                description = input("Enter ticket description: ")
 
-            try:
                 ticket = manager.create_ticket(title, description)
 
                 print("\nTicket created successfully!")
                 display_ticket(ticket)
 
-            except ValueError as error:
-                print(f"\nError: {error}")
-
-            except OSError:
-                print("\nError: Could not save the ticket.")
-
-        # F2: View all tickets
-        elif choice == "2":
-            if not manager.tickets:
-                print("\nNo tickets have been created yet.")
-            else:
-                print("\n===== ALL TICKETS =====")
+            elif choice == "2":
+                if not manager.tickets:
+                    print("No tickets found.")
+                    continue
 
                 for ticket in manager.tickets:
                     display_ticket(ticket)
 
-        # Search tickets by ID or title
-        elif choice == "3":
-            query = input("Enter ticket ID or title: ")
+            elif choice == "3":
+                query = input("Enter ticket ID or title: ")
+                results = manager.search_tickets(query)
 
-            try:
-                matches = manager.search_tickets(query)
-
-                if not matches:
-                    print("\nNo matching tickets found.")
-                else:
-                    print(f"\nFound {len(matches)} matching ticket(s):")
-
-                    for ticket in matches:
+                if results:
+                    for ticket in results:
                         display_ticket(ticket)
+                else:
+                    print("No matching tickets found.")
 
-            except ValueError as error:
-                print(f"\nError: {error}")
+            elif choice == "4":
+                ticket_id = input("Enter ticket ID: ")
+                staff_name = input("Enter staff member's name: ")
 
-        # F3: Assign a ticket to a staff member
-        elif choice == "4":
-            ticket_id = input("Enter ticket ID: ").strip()
-            staff_name = input("Enter staff member's name: ")
-
-            try:
                 ticket = manager.assign_ticket(ticket_id, staff_name)
 
                 print("\nTicket assigned successfully!")
                 display_ticket(ticket)
 
-            except ValueError as error:
-                print(f"\nError: {error}")
+            elif choice == "5":
+                queue = manager.get_work_queue()
 
-            except OSError:
-                print("\nError: Could not save the assignment.")
+                if not queue:
+                    print("There are no open tickets in the work queue.")
+                    continue
 
-        # F5: View the work queue
-        elif choice == "5":
-            queue = manager.get_work_queue()
+                print("\n===== WORK QUEUE =====")
 
-            if not queue:
-                print("\nThe work queue is empty.")
-            else:
-                print("\n===== OPEN TICKET WORK QUEUE =====")
-
-                for position, ticket in enumerate(queue, start=1):
-                    print(f"\nQueue position: {position}")
+                for ticket in queue:
                     display_ticket(ticket)
 
-        # Exit
-        elif choice == "6":
-            print("\nThank you for using Campus Flow.")
-            break
+            elif choice == "6":
+                ticket_id = input("Enter ticket ID: ")
+                print("Available statuses: open, in_progress, resolved")
+                new_status = input("Enter the new status: ")
 
-        else:
-            print("\nInvalid option. Please choose from 1 to 6.")
+                ticket = manager.update_status(ticket_id, new_status)
+
+                print("\nTicket status updated successfully!")
+                display_ticket(ticket)
+
+            elif choice == "7":
+                report = manager.generate_report()
+
+                print("\n===== TICKET REPORT =====")
+                print(f"Total tickets: {report['total_tickets']}")
+
+                print("\nTickets by status:")
+                for status, count in report["by_status"].items():
+                    print(f"  {status}: {count}")
+
+                print("\nTickets by priority:")
+                for priority, count in report["by_priority"].items():
+                    print(f"  {priority}: {count}")
+
+            elif choice == "8":
+                print("Thank you for using Campus Flow!")
+                break
+
+            else:
+                print("Invalid choice. Please select an option from 1 to 8.")
+
+        except (ValueError, OSError) as error:
+            print(f"Error: {error}")
 
 
 if __name__ == "__main__":

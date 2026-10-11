@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 class TicketManager:
-    """Manage ticket creation, assignment, searching, queues, and storage."""
+    """Manage ticket creation, assignment, workflow, reports, and storage."""
 
     PRIORITY_ORDER = {
         "critical": 0,
@@ -105,6 +105,103 @@ class TicketManager:
             raise
 
         return ticket
+
+    def update_status(self, ticket_id, new_status):
+        """
+        Update a ticket's status while enforcing the workflow.
+
+        Allowed transitions:
+        open -> in_progress
+        in_progress -> resolved
+        resolved -> open (explicit reopening)
+        """
+
+        if not isinstance(new_status, str):
+            raise ValueError("Status must be a string.")
+
+        new_status = new_status.strip().lower()
+
+        if new_status not in self.VALID_STATUSES:
+            raise ValueError(
+                "Invalid status. Choose open, in_progress, or resolved."
+            )
+
+        ticket = self._find_ticket(ticket_id)
+
+        if ticket is None:
+            raise ValueError(f"Ticket {ticket_id} was not found.")
+
+        current_status = ticket["status"]
+
+        # Repeating the current status is not a workflow transition.
+        if new_status == current_status:
+            raise ValueError(
+                f"Ticket {ticket_id} is already {current_status}."
+            )
+
+        # A ticket can only be worked on when it has an assignee.
+        if new_status == "in_progress":
+            if current_status != "open":
+                raise ValueError(
+                    "Only open tickets can move to in_progress."
+                )
+
+            if not ticket["assignee"]:
+                raise ValueError(
+                    "Assign the ticket to a staff member before "
+                    "moving it to in_progress."
+                )
+
+        # Resolve tickets only after work has started.
+        elif new_status == "resolved":
+            if current_status != "in_progress":
+                raise ValueError(
+                    "Only in_progress tickets can be resolved."
+                )
+
+        # Reopening a resolved ticket must be explicit.
+        elif new_status == "open":
+            if current_status != "resolved":
+                raise ValueError(
+                    "Only resolved tickets can be reopened to open."
+                )
+
+        previous_status = ticket["status"]
+        ticket["status"] = new_status
+
+        try:
+            self.save_tickets()
+        except OSError:
+            ticket["status"] = previous_status
+            raise
+
+        return ticket
+
+    def generate_report(self):
+        """
+        Generate ticket totals grouped by status and priority.
+
+        All valid statuses and priorities are included, even when
+        their counts are zero.
+        """
+
+        report = {
+            "total_tickets": len(self.tickets),
+            "by_status": {
+                status: 0
+                for status in sorted(self.VALID_STATUSES)
+            },
+            "by_priority": {
+                priority: 0
+                for priority in self.PRIORITY_ORDER
+            },
+        }
+
+        for ticket in self.tickets:
+            report["by_status"][ticket["status"]] += 1
+            report["by_priority"][ticket["priority"]] += 1
+
+        return report
 
     def _find_ticket(self, ticket_id):
         """Find a ticket using its numeric ID."""
@@ -213,7 +310,10 @@ class TicketManager:
 
             seen_ids.add(ticket_id)
 
-            if not isinstance(ticket["title"], str) or not ticket["title"].strip():
+            if (
+                not isinstance(ticket["title"], str)
+                or not ticket["title"].strip()
+            ):
                 raise ValueError("Every ticket must have a title.")
 
             if (
@@ -222,12 +322,18 @@ class TicketManager:
             ):
                 raise ValueError("Every ticket must have a description.")
 
-            if ticket["priority"] not in self.PRIORITY_ORDER:
+            if (
+                not isinstance(ticket["priority"], str)
+                or ticket["priority"] not in self.PRIORITY_ORDER
+            ):
                 raise ValueError(
                     f"Invalid priority for ticket {ticket_id}."
                 )
 
-            if ticket["status"] not in self.VALID_STATUSES:
+            if (
+                not isinstance(ticket["status"], str)
+                or ticket["status"] not in self.VALID_STATUSES
+            ):
                 raise ValueError(
                     f"Invalid status for ticket {ticket_id}."
                 )
@@ -244,4 +350,6 @@ class TicketManager:
         self.tickets = loaded_tickets
 
         if self.tickets:
-            self.next_id = max(ticket["id"] for ticket in self.tickets) + 1
+            self.next_id = max(
+                ticket["id"] for ticket in self.tickets
+            ) + 1
