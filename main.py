@@ -6,14 +6,16 @@ def display_ticket(ticket):
 
     print(f"\nID: {ticket['id']}")
     print(f"Title: {ticket['title']}")
-    print(f"Description: {ticket['description']}")
+    print(f"Category: {ticket['category']}")
+    print(f"Urgency: {ticket['urgency']}")
+    print(f"Affected users: {ticket['affected_users']}")
     print(f"Priority: {ticket['priority']}")
     print(f"Status: {ticket['status']}")
-    print(f"Assignee: {ticket['assignee'] or 'Unassigned'}")
+    print(f"Assigned to: {ticket['assigned_to'] or 'Unassigned'}")
 
 
 def main():
-    """Run the Campus Flow ticket management application."""
+    """Run the Campus Flow application."""
 
     try:
         manager = TicketManager()
@@ -37,9 +39,22 @@ def main():
         try:
             if choice == "1":
                 title = input("Enter ticket title: ")
-                description = input("Enter ticket description: ")
+                category = input(
+                    "Enter category (Network/Hardware/Software/Other): "
+                )
+                urgency = input(
+                    "Enter urgency (low/medium/high): "
+                )
+                affected_users = int(
+                    input("Enter number of affected users: ")
+                )
 
-                ticket = manager.create_ticket(title, description)
+                ticket = manager.create_ticket(
+                    title,
+                    category,
+                    urgency,
+                    affected_users,
+                )
 
                 print("\nTicket created successfully!")
                 display_ticket(ticket)
@@ -63,7 +78,7 @@ def main():
                     print("No matching tickets found.")
 
             elif choice == "4":
-                ticket_id = input("Enter ticket ID: ")
+                ticket_id = input("Enter ticket ID (e.g. T001): ")
                 staff_name = input("Enter staff member's name: ")
 
                 ticket = manager.assign_ticket(ticket_id, staff_name)
@@ -84,7 +99,7 @@ def main():
                     display_ticket(ticket)
 
             elif choice == "6":
-                ticket_id = input("Enter ticket ID: ")
+                ticket_id = input("Enter ticket ID (e.g. T001): ")
                 print("Available statuses: open, in_progress, resolved")
                 new_status = input("Enter the new status: ")
 
@@ -114,8 +129,10 @@ def main():
             else:
                 print("Invalid choice. Please select an option from 1 to 8.")
 
-        except (ValueError, OSError) as error:
+        except ValueError as error:
             print(f"Error: {error}")
+        except OSError as error:
+            print(f"File operation failed: {error}")
 
 
 if __name__ == "__main__":

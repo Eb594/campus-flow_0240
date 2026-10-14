@@ -1,9 +1,19 @@
 import json
+import re
 from pathlib import Path
 
 
 class TicketManager:
-    """Manage ticket creation, assignment, workflow, reports, and storage."""
+    """Manage Campus Flow tickets and JSON persistence."""
+
+    CATEGORIES = {
+        "network": "Network",
+        "hardware": "Hardware",
+        "software": "Software",
+        "other": "Other",
+    }
+
+    URGENCIES = {"low", "medium", "high"}
 
     PRIORITY_ORDER = {
         "critical": 0,
@@ -20,41 +30,67 @@ class TicketManager:
         self.next_id = 1
         self.load_tickets()
 
-    def calculate_priority(self, title, description):
-        """Calculate ticket priority using keyword rules."""
+    def calculate_priority(self, urgency, affected_users):
+        """Calculate priority using the assignment's rules."""
 
-        text = f"{title} {description}".lower()
+        if urgency not in self.URGENCIES:
+            raise ValueError("Urgency must be low, medium, or high.")
 
-        if "critical" in text:
+        if (
+            isinstance(affected_users, bool)
+            or not isinstance(affected_users, int)
+            or affected_users < 1
+        ):
+            raise ValueError("Affected users must be a positive integer.")
+
+        if urgency == "high" and affected_users >= 10:
             return "critical"
 
-        high_priority_words = ["urgent", "emergency", "danger"]
-        medium_priority_words = ["broken", "failure", "error", "problem"]
-
-        if any(word in text for word in high_priority_words):
+        if urgency == "high" or affected_users >= 10:
             return "high"
 
-        if any(word in text for word in medium_priority_words):
+        if urgency == "medium" or affected_users >= 3:
             return "medium"
 
         return "low"
 
-    def create_ticket(self, title, description):
-        """Validate and create a new ticket."""
+    def create_ticket(
+        self, title, category, urgency, affected_users
+    ):
+        """Validate and create a ticket."""
 
         if not isinstance(title, str) or not title.strip():
             raise ValueError("Ticket title is required.")
 
-        if not isinstance(description, str) or not description.strip():
-            raise ValueError("Ticket description is required.")
+        if not isinstance(category, str):
+            raise ValueError("A valid ticket category is required.")
+
+        category_key = category.strip().casefold()
+
+        if category_key not in self.CATEGORIES:
+            raise ValueError(
+                "Category must be Network, Hardware, Software, or Other."
+            )
+
+        if not isinstance(urgency, str):
+            raise ValueError("Urgency must be low, medium, or high.")
+
+        urgency = urgency.strip().lower()
+
+        if urgency not in self.URGENCIES:
+            raise ValueError("Urgency must be low, medium, or high.")
+
+        priority = self.calculate_priority(urgency, affected_users)
 
         ticket = {
-            "id": self.next_id,
+            "id": f"T{self.next_id:03d}",
             "title": title.strip(),
-            "description": description.strip(),
-            "priority": self.calculate_priority(title, description),
+            "category": self.CATEGORIES[category_key],
+            "urgency": urgency,
+            "affected_users": affected_users,
+            "priority": priority,
             "status": "open",
-            "assignee": None,
+            "assigned_to": None,
         }
 
         self.tickets.append(ticket)
@@ -70,7 +106,7 @@ class TicketManager:
         return ticket
 
     def search_tickets(self, query):
-        """Search tickets by ID or title."""
+        """Search tickets by ID or a case-insensitive title substring."""
 
         if not isinstance(query, str) or not query.strip():
             raise ValueError("Search query cannot be empty.")
@@ -80,12 +116,26 @@ class TicketManager:
         return [
             ticket
             for ticket in self.tickets
-            if str(ticket["id"]) == query
+            if ticket["id"].casefold() == query.casefold()
             or query.casefold() in ticket["title"].casefold()
         ]
 
+    def _find_ticket(self, ticket_id):
+        """Find a ticket by its ID."""
+
+        if not isinstance(ticket_id, str):
+            return None
+
+        ticket_id = ticket_id.strip().upper()
+
+        for ticket in self.tickets:
+            if ticket["id"] == ticket_id:
+                return ticket
+
+        return None
+
     def assign_ticket(self, ticket_id, staff_name):
-        """Assign an existing ticket to a staff member."""
+        """Assign an open or in-progress ticket to a staff member."""
 
         if not isinstance(staff_name, str) or not staff_name.strip():
             raise ValueError("Staff name cannot be empty.")
@@ -95,26 +145,24 @@ class TicketManager:
         if ticket is None:
             raise ValueError(f"Ticket {ticket_id} was not found.")
 
-        previous_assignee = ticket["assignee"]
-        ticket["assignee"] = staff_name.strip()
+        if ticket["status"] == "resolved":
+            raise ValueError(
+                "Reopen the resolved ticket before changing its assignment."
+            )
+
+        previous_assignee = ticket["assigned_to"]
+        ticket["assigned_to"] = staff_name.strip()
 
         try:
             self.save_tickets()
         except OSError:
-            ticket["assignee"] = previous_assignee
+            ticket["assigned_to"] = previous_assignee
             raise
 
         return ticket
 
     def update_status(self, ticket_id, new_status):
-        """
-        Update a ticket's status while enforcing the workflow.
-
-        Allowed transitions:
-        open -> in_progress
-        in_progress -> resolved
-        resolved -> open (explicit reopening)
-        """
+        """Enforce the required ticket workflow."""
 
         if not isinstance(new_status, str):
             raise ValueError("Status must be a string.")
@@ -123,7 +171,7 @@ class TicketManager:
 
         if new_status not in self.VALID_STATUSES:
             raise ValueError(
-                "Invalid status. Choose open, in_progress, or resolved."
+                "Choose open, in_progress, or resolved."
             )
 
         ticket = self._find_ticket(ticket_id)
@@ -133,37 +181,32 @@ class TicketManager:
 
         current_status = ticket["status"]
 
-        # Repeating the current status is not a workflow transition.
         if new_status == current_status:
             raise ValueError(
                 f"Ticket {ticket_id} is already {current_status}."
             )
 
-        # A ticket can only be worked on when it has an assignee.
         if new_status == "in_progress":
             if current_status != "open":
                 raise ValueError(
                     "Only open tickets can move to in_progress."
                 )
 
-            if not ticket["assignee"]:
+            if not ticket["assigned_to"]:
                 raise ValueError(
-                    "Assign the ticket to a staff member before "
-                    "moving it to in_progress."
+                    "Assign the ticket before moving it to in_progress."
                 )
 
-        # Resolve tickets only after work has started.
         elif new_status == "resolved":
             if current_status != "in_progress":
                 raise ValueError(
                     "Only in_progress tickets can be resolved."
                 )
 
-        # Reopening a resolved ticket must be explicit.
         elif new_status == "open":
             if current_status != "resolved":
                 raise ValueError(
-                    "Only resolved tickets can be reopened to open."
+                    "Only resolved tickets can be reopened."
                 )
 
         previous_status = ticket["status"]
@@ -177,13 +220,25 @@ class TicketManager:
 
         return ticket
 
-    def generate_report(self):
-        """
-        Generate ticket totals grouped by status and priority.
+    def get_work_queue(self):
+        """Return open tickets by priority and then ticket ID."""
 
-        All valid statuses and priorities are included, even when
-        their counts are zero.
-        """
+        open_tickets = [
+            ticket
+            for ticket in self.tickets
+            if ticket["status"] == "open"
+        ]
+
+        return sorted(
+            open_tickets,
+            key=lambda ticket: (
+                self.PRIORITY_ORDER[ticket["priority"]],
+                int(ticket["id"][1:]),
+            ),
+        )
+
+    def generate_report(self):
+        """Return ticket totals grouped by status and priority."""
 
         report = {
             "total_tickets": len(self.tickets),
@@ -203,39 +258,8 @@ class TicketManager:
 
         return report
 
-    def _find_ticket(self, ticket_id):
-        """Find a ticket using its numeric ID."""
-
-        try:
-            numeric_id = int(ticket_id)
-        except (TypeError, ValueError):
-            return None
-
-        for ticket in self.tickets:
-            if ticket["id"] == numeric_id:
-                return ticket
-
-        return None
-
-    def get_work_queue(self):
-        """Return open tickets by priority, then ascending ticket ID."""
-
-        open_tickets = [
-            ticket
-            for ticket in self.tickets
-            if ticket["status"] == "open"
-        ]
-
-        return sorted(
-            open_tickets,
-            key=lambda ticket: (
-                self.PRIORITY_ORDER[ticket["priority"]],
-                ticket["id"],
-            ),
-        )
-
     def save_tickets(self):
-        """Save tickets to JSON without partially overwriting the data file."""
+        """Save tickets safely using a temporary file."""
 
         temporary_path = self.file_path.with_name(
             self.file_path.name + ".tmp"
@@ -257,7 +281,7 @@ class TicketManager:
             raise
 
     def load_tickets(self):
-        """Load and validate previously saved tickets."""
+        """Load and validate all saved tickets."""
 
         if not self.file_path.exists():
             return
@@ -278,32 +302,36 @@ class TicketManager:
 
         seen_ids = set()
 
+        required_fields = {
+            "id",
+            "title",
+            "category",
+            "urgency",
+            "affected_users",
+            "priority",
+            "status",
+            "assigned_to",
+        }
+
+        # Validate everything before changing the manager's state.
         for ticket in loaded_tickets:
             if not isinstance(ticket, dict):
                 raise ValueError("Every ticket must be a JSON object.")
 
-            required_fields = {
-                "id",
-                "title",
-                "description",
-                "priority",
-                "status",
-                "assignee",
-            }
-
             if not required_fields.issubset(ticket):
                 raise ValueError(
-                    "A ticket is missing one or more required fields."
+                    "A ticket is missing required fields."
                 )
 
             ticket_id = ticket["id"]
 
             if (
-                isinstance(ticket_id, bool)
-                or not isinstance(ticket_id, int)
-                or ticket_id < 1
+                not isinstance(ticket_id, str)
+                or not re.fullmatch(r"T\d{3,}", ticket_id)
             ):
-                raise ValueError("Ticket IDs must be positive integers.")
+                raise ValueError(
+                    "Ticket IDs must follow the format T001, T002, etc."
+                )
 
             if ticket_id in seen_ids:
                 raise ValueError(f"Duplicate ticket ID: {ticket_id}")
@@ -314,31 +342,56 @@ class TicketManager:
                 not isinstance(ticket["title"], str)
                 or not ticket["title"].strip()
             ):
-                raise ValueError("Every ticket must have a title.")
-
-            if (
-                not isinstance(ticket["description"], str)
-                or not ticket["description"].strip()
-            ):
-                raise ValueError("Every ticket must have a description.")
-
-            if (
-                not isinstance(ticket["priority"], str)
-                or ticket["priority"] not in self.PRIORITY_ORDER
-            ):
                 raise ValueError(
-                    f"Invalid priority for ticket {ticket_id}."
+                    f"Ticket {ticket_id} must have a title."
                 )
 
+            category = ticket["category"]
+
             if (
-                not isinstance(ticket["status"], str)
-                or ticket["status"] not in self.VALID_STATUSES
+                not isinstance(category, str)
+                or category.casefold() not in self.CATEGORIES
             ):
+                raise ValueError(
+                    f"Invalid category for ticket {ticket_id}."
+                )
+
+            urgency = ticket["urgency"]
+
+            if (
+                not isinstance(urgency, str)
+                or urgency not in self.URGENCIES
+            ):
+                raise ValueError(
+                    f"Invalid urgency for ticket {ticket_id}."
+                )
+
+            affected_users = ticket["affected_users"]
+
+            if (
+                isinstance(affected_users, bool)
+                or not isinstance(affected_users, int)
+                or affected_users < 1
+            ):
+                raise ValueError(
+                    f"Invalid affected-user count for ticket {ticket_id}."
+                )
+
+            expected_priority = self.calculate_priority(
+                urgency, affected_users
+            )
+
+            if ticket["priority"] != expected_priority:
+                raise ValueError(
+                    f"Incorrect priority for ticket {ticket_id}."
+                )
+
+            if ticket["status"] not in self.VALID_STATUSES:
                 raise ValueError(
                     f"Invalid status for ticket {ticket_id}."
                 )
 
-            assignee = ticket["assignee"]
+            assignee = ticket["assigned_to"]
 
             if assignee is not None and (
                 not isinstance(assignee, str) or not assignee.strip()
@@ -351,5 +404,5 @@ class TicketManager:
 
         if self.tickets:
             self.next_id = max(
-                ticket["id"] for ticket in self.tickets
+                int(ticket["id"][1:]) for ticket in self.tickets
             ) + 1
