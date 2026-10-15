@@ -106,6 +106,105 @@ class TicketManager:
             if t["id"].casefold() == query or query in t["title"].casefold()
         ]
 
+    # ----- combined search and filtering (read-only; from main) --------
+
+    def normalize_category_filter(self, category):
+        """Return a canonical category name, or None for an empty filter."""
+        if category is None:
+            return None
+        if not isinstance(category, str):
+            raise ValueError(
+                "Category must be Network, Hardware, Software, or Other."
+            )
+        key = category.strip().casefold()
+        if not key:
+            return None
+        if key not in self.CATEGORIES:
+            raise ValueError(
+                "Category must be Network, Hardware, Software, or Other."
+            )
+        return self.CATEGORIES[key]
+
+    def normalize_status_filter(self, status):
+        """Return a canonical status, or None for an empty filter."""
+        if status is None:
+            return None
+        if not isinstance(status, str):
+            raise ValueError("Status must be open, in_progress, or resolved.")
+        key = status.strip().lower()
+        if not key:
+            return None
+        if key not in self.VALID_STATUSES:
+            raise ValueError("Status must be open, in_progress, or resolved.")
+        return key
+
+    def normalize_priority_filter(self, priority):
+        """Return a canonical priority, or None for an empty filter."""
+        if priority is None:
+            return None
+        if not isinstance(priority, str):
+            raise ValueError(
+                "Priority must be critical, high, medium, or low."
+            )
+        key = priority.strip().lower()
+        if not key:
+            return None
+        if key not in self.PRIORITY_ORDER:
+            raise ValueError(
+                "Priority must be critical, high, medium, or low."
+            )
+        return key
+
+    def search_filtered(
+        self, title_query="", category=None, status=None, priority=None
+    ):
+        """Search by title substring and optional filters (logical AND).
+
+        Read-only: stored tickets are never modified or reordered, and
+        copies are returned so callers cannot change stored data.
+        Empty or None arguments do not restrict the results. Invalid
+        filter values raise ValueError before any searching happens.
+        """
+        if title_query is None:
+            title_query = ""
+        if not isinstance(title_query, str):
+            raise ValueError("Search text must be a string.")
+
+        category = self.normalize_category_filter(category)
+        status = self.normalize_status_filter(status)
+        priority = self.normalize_priority_filter(priority)
+        needle = title_query.strip().casefold()
+
+        results = []
+        for ticket in self.tickets:
+            if needle and needle not in ticket["title"].casefold():
+                continue
+            if (
+                category is not None
+                and self.CATEGORIES[ticket["category"].casefold()] != category
+            ):
+                continue
+            if status is not None and ticket["status"] != status:
+                continue
+            if priority is not None and ticket["priority"] != priority:
+                continue
+            results.append(dict(ticket))
+        return results
+
+    def sort_by_priority(self, tickets):
+        """Return a NEW list ordered by priority, then ticket ID.
+
+        Separate, optional view for search results. The input list and
+        the manager's own ticket list are left untouched.
+        """
+        return sorted(
+            tickets,
+            key=lambda ticket: (
+                self.PRIORITY_ORDER[ticket["priority"]],
+                int(ticket["id"][1:]),
+            ),
+        )
+
     def assign_ticket(self, ticket_id, staff_name):
         staff_name = v.validate_label(staff_name, "Staff name")
         ticket = self._get_ticket(ticket_id)
@@ -137,15 +236,30 @@ class TicketManager:
         )
 
     def generate_report(self):
-        """Return ticket totals grouped by status and priority."""
+        """Return ticket statistics.
+
+        Every figure is derived from each ticket's CURRENT status, so a
+        reopened ticket is counted as open and never double-counted.
+        """
+        total = len(self.tickets)
         report = {
-            "total_tickets": len(self.tickets),
-            "by_status": dict.fromkeys(sorted(self.VALID_STATUSES), 0),
-            "by_priority": dict.fromkeys(self.PRIORITY_ORDER, 0),
+            "total_tickets": total,
+            "by_status": {s: 0 for s in sorted(self.VALID_STATUSES)},
+            "by_priority": {p: 0 for p in self.PRIORITY_ORDER},
+            "by_category": {name: 0 for name in self.CATEGORIES.values()},
         }
         for ticket in self.tickets:
             report["by_status"][ticket["status"]] += 1
             report["by_priority"][ticket["priority"]] += 1
+            report["by_category"][ticket["category"]] += 1
+
+        report["unresolved"] = (
+            report["by_status"]["open"] + report["by_status"]["in_progress"]
+        )
+        report["resolved"] = report["by_status"]["resolved"]
+        report["resolution_percentage"] = (
+            round(report["resolved"] / total * 100, 1) if total else 0.0
+        )
         return report
 
     # ----- notes -------------------------------------------------------
