@@ -150,3 +150,22 @@ The project can run without installing third-party Python packages.
 - The application does not currently provide a graphical interface.
 - More extensive integration and invalid-data tests may be useful as
   the project grows.
+
+## 12. CampusFlow Next additions
+
+- **Validate before mutate.** Pure helpers in `validation.py` check every input
+  first; the manager changes data only after all checks pass. A failed save is
+  undone, so a rejected or failed action leaves the collection unchanged.
+- **One error convention.** `ValueError` for invalid input, `OSError` for file
+  problems. No mixed "return False" results.
+- **Notes live inside each ticket** (`ticket["notes"]`). Note IDs are the highest
+  existing number + 1, so a rejected note can never consume an ID.
+- **Booleans are rejected for `affected_users`.** `isinstance(True, int)` is true
+  in Python, so the check excludes `bool` explicitly.
+- **Search is a pure function** over a list of tickets with AND semantics, kept
+  apart from the CLI so it can be tested without typing. The original open work
+  queue is unchanged; sorted search is a separate menu option.
+- **Atomic loading.** `load_tickets` builds a new validated list and swaps it in
+  only at the end, so a bad file cannot partly overwrite good data.
+- **Backward compatible file format.** Still a JSON list; old files without
+  `notes` load with an empty list.

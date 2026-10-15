@@ -143,8 +143,6 @@ class TestTicketStorage(unittest.TestCase):
         """Status changes should survive a reload."""
         ticket = self.create_ticket()
 
-        self.manager.update_status(ticket["id"], "in_progress") if False else None
-
         self.manager.assign_ticket(ticket["id"], "John")
         self.manager.update_status(ticket["id"], "in_progress")
 
@@ -165,3 +163,81 @@ class TestTicketStorage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+import copy as _copy
+from helpers import ManagerTestCase as _Base
+
+
+def _record(**changes):
+    record = {"id": "T001", "title": "Wifi down", "category": "Network",
+              "urgency": "high", "affected_users": 2, "priority": "high",
+              "status": "open", "assigned_to": None, "notes": []}
+    record.update(changes)
+    return record
+
+
+class TestSafeLoading(_Base):
+    """A failed load must never damage what is already in memory."""
+
+    def write(self, data):
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_legacy_ticket_without_notes_loads_with_empty_notes(self):
+        legacy = _record()
+        del legacy["notes"]
+        self.write([legacy])
+        self.assertEqual(TicketManager(file_path=self.path).tickets[0]["notes"], [])
+
+    def test_failed_reload_keeps_current_memory(self):
+        self.make(); self.make("Second ticket")
+        before = _copy.deepcopy(self.manager.tickets)
+        bad_files = {
+            "corrupt json": "{not json",
+            "not a list": json.dumps({"a": 1}),
+            "duplicate ids": json.dumps([_record(), _record(title="Other")]),
+            "second record bad": json.dumps([_record(), _record(id="T002", status="done")]),
+        }
+        for name, text in bad_files.items():
+            with self.subTest(name):
+                self.path.write_text(text, encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    self.manager.load_tickets()
+                self.assertEqual(self.manager.tickets, before)
+
+    def test_invalid_records_are_rejected(self):
+        bad_records = {
+            "missing field": {k: v for k, v in _record().items() if k != "title"},
+            "bad ticket id": _record(id="X1"),
+            "bool users": _record(affected_users=True),
+            "float users": _record(affected_users=2.0),
+            "bad category": _record(category="Furniture"),
+            "wrong priority": _record(priority="low"),
+            "blank assignee": _record(assigned_to="  "),
+            "notes not list": _record(notes="hi"),
+            "note bad shape": _record(notes=[{"note_id": "N001", "author": "A"}]),
+            "note too short": _record(notes=[{"note_id": "N001", "author": "A", "message": "hey"}]),
+            "note blank author": _record(notes=[{"note_id": "N001", "author": " ", "message": "hello there"}]),
+            "duplicate note ids": _record(notes=[
+                {"note_id": "N001", "author": "A", "message": "hello there"},
+                {"note_id": "N001", "author": "B", "message": "another one"}]),
+        }
+        for name, record in bad_records.items():
+            with self.subTest(name):
+                self.write([record])
+                with self.assertRaises(ValueError):
+                    TicketManager(file_path=self.path)
+
+    def test_ids_do_not_collide_after_reload(self):
+        a, b = self.make(), self.make("Second")
+        self.manager.add_note(b["id"], "A", "a note here")
+        reloaded = TicketManager(file_path=self.path)
+        self.assertEqual(reloaded.create_ticket("Third", "Other", "low", 1)["id"], "T003")
+        self.assertEqual(reloaded.add_note(b["id"], "A", "next note")["note_id"], "N002")
+        self.assertEqual(reloaded.add_note(a["id"], "A", "other ticket")["note_id"], "N001")
+
+    def test_saved_file_is_a_list_with_notes(self):
+        ticket = self.make()
+        self.manager.add_note(ticket["id"], "A", "saved note")
+        saved = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(saved[0]["notes"][0]["message"], "saved note")
