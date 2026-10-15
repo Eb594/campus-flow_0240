@@ -38,7 +38,7 @@ def prompt_filter(label, normalizer):
 
 
 def prompt_affected_users():
-    """Read a whole number, with a friendly message if it is not one."""
+    """Read a whole number, with a friendly message if invalid."""
 
     raw = input("Enter number of affected users: ").strip()
 
@@ -51,23 +51,28 @@ def prompt_affected_users():
 
 
 def search_menu(manager):
-    """Combined title search with optional filters (read-only)."""
+    """Search tickets with optional filters."""
 
     title = input("Title contains (press Enter to skip): ")
+
     category = prompt_filter(
         "Category (Network/Hardware/Software/Other)",
         manager.normalize_category_filter,
     )
+
     status = prompt_filter(
         "Status (open/in_progress/resolved)",
         manager.normalize_status_filter,
     )
+
     priority = prompt_filter(
         "Priority (critical/high/medium/low)",
         manager.normalize_priority_filter,
     )
 
-    results = manager.search_filtered(title, category, status, priority)
+    results = manager.search_filtered(
+        title, category, status, priority
+    )
 
     if not results:
         print("No matching tickets found.")
@@ -79,7 +84,9 @@ def search_menu(manager):
     for ticket in results:
         display_search_result(ticket)
 
-    view = input("\nShow results sorted by priority? (y/n): ").strip().lower()
+    view = input(
+        "\nShow results sorted by priority? (y/n): "
+    ).strip().lower()
 
     if view == "y":
         print("\n===== SEARCH RESULTS (BY PRIORITY) =====")
@@ -89,6 +96,8 @@ def search_menu(manager):
 
 
 def show_report(manager):
+    """Display the ticket report."""
+
     report = manager.generate_report()
 
     print("\n===== TICKET REPORT =====")
@@ -106,20 +115,31 @@ def show_report(manager):
     for category, count in report["by_category"].items():
         print(f"  {category}: {count}")
 
-    print(f"\nUnresolved (open + in_progress): {report['unresolved']}")
+    print(
+        f"\nUnresolved (open + in_progress): "
+        f"{report['unresolved']}"
+    )
+
     print(f"Resolved: {report['resolved']}")
     print(f"Resolution rate: {report['resolution_percentage']}%")
 
 
 def quiz_menu():
+    """Run the engineering understanding quiz."""
+
     result = run_quiz()
 
     if result.explanations:
-        print("\n===== YOUR EXPLANATIONS (for mentor discussion) =====")
+        print(
+            "\n===== YOUR EXPLANATIONS "
+            "(for mentor discussion) ====="
+        )
 
         for item in result.explanations:
-            print(f"Q{item['question']} ({item['scenario']}): "
-                  f"{item['explanation']}")
+            print(
+                f"Q{item['question']} ({item['scenario']}): "
+                f"{item['explanation']}"
+            )
 
         path = save_explanations(result)
         print(f"\nExplanations saved to {path}.")
@@ -148,19 +168,30 @@ def main():
         print("10. Engineering understanding check")
         print("11. Exit")
 
-        choice = input("Choose an option (1-11): ").strip()
+        choice = input(
+            "Choose an option (1-11): "
+        ).strip()
 
         try:
             if choice == "1":
                 title = input("Enter ticket title: ")
+
                 category = input(
-                    "Enter category (Network/Hardware/Software/Other): "
+                    "Enter category "
+                    "(Network/Hardware/Software/Other): "
                 )
-                urgency = input("Enter urgency (low/medium/high): ")
+
+                urgency = input(
+                    "Enter urgency (low/medium/high): "
+                )
+
                 affected_users = prompt_affected_users()
 
                 ticket = manager.create_ticket(
-                    title, category, urgency, affected_users
+                    title,
+                    category,
+                    urgency,
+                    affected_users,
                 )
 
                 print("\nTicket created successfully!")
@@ -178,10 +209,17 @@ def main():
                 search_menu(manager)
 
             elif choice == "4":
-                ticket_id = input("Enter ticket ID (e.g. T001): ")
-                staff_name = input("Enter staff member's name: ")
+                ticket_id = input(
+                    "Enter ticket ID (e.g. T001): "
+                )
 
-                ticket = manager.assign_ticket(ticket_id, staff_name)
+                staff_name = input(
+                    "Enter staff member's name: "
+                )
+
+                ticket = manager.assign_ticket(
+                    ticket_id, staff_name
+                )
 
                 print("\nTicket assigned successfully!")
                 display_ticket(ticket)
@@ -190,7 +228,10 @@ def main():
                 queue = manager.get_work_queue()
 
                 if not queue:
-                    print("There are no open tickets in the work queue.")
+                    print(
+                        "There are no open tickets "
+                        "in the work queue."
+                    )
                     continue
 
                 print("\n===== WORK QUEUE =====")
@@ -199,13 +240,27 @@ def main():
                     display_ticket(ticket)
 
             elif choice == "6":
-                ticket_id = input("Enter ticket ID (e.g. T001): ")
-                print("Available statuses: open, in_progress, resolved")
-                new_status = input("Enter the new status: ")
+                ticket_id = input(
+                    "Enter ticket ID (e.g. T001): "
+                )
 
-                ticket = manager.update_status(ticket_id, new_status)
+                print(
+                    "Available statuses: "
+                    "open, in_progress, resolved"
+                )
 
-                print("\nTicket status updated successfully!")
+                new_status = input(
+                    "Enter the new status: "
+                )
+
+                ticket = manager.update_status(
+                    ticket_id, new_status
+                )
+
+                print(
+                    "\nTicket status updated successfully!"
+                )
+
                 display_ticket(ticket)
 
             elif choice == "7":
@@ -213,24 +268,37 @@ def main():
 
             elif choice == "8":
                 ticket_id = input("Enter ticket ID (e.g. T001): ")
-                text = input("Enter your follow-up note: ")
+                message = input("Enter your follow-up note: ")
 
-                note = manager.add_note(ticket_id, text)
-
-                print(f"\nNote {note['id']} added successfully!")
+                try:
+                    note = manager.add_note(
+                        ticket_id,
+                        "Campus Flow user",
+                        message
+                    )
+                    note_number = int(note["note_id"][1:])
+                    print(f"\\nNote {note_number} added successfully!")
+                except (ValueError, OSError) as error:
+                    print(f"Error: {error}")
 
             elif choice == "9":
                 ticket_id = input("Enter ticket ID (e.g. T001): ")
-                notes = manager.get_notes(ticket_id)
 
-                if not notes:
-                    print("This ticket has no notes yet.")
-                    continue
+                try:
+                    notes = manager.get_notes(ticket_id)
 
-                print(f"\n===== NOTES FOR {ticket_id.strip().upper()} =====")
+                    if not notes:
+                        print("This ticket has no notes yet.")
+                        continue
 
-                for note in notes:
-                    print(f"[{note['id']}] {note['text']}")
+                    print(f"\\n===== NOTES FOR {ticket_id.strip().upper()} =====")
+
+                    for note in notes:
+                        note_number = int(note["note_id"][1:])
+                        print(f"[{note_number}] {note['message']}")
+
+                except ValueError as error:
+                    print(f"Error: {error}")
 
             elif choice == "10":
                 quiz_menu()
@@ -240,10 +308,14 @@ def main():
                 break
 
             else:
-                print("Invalid choice. Please select an option from 1 to 11.")
+                print(
+                    "Invalid choice. "
+                    "Please select an option from 1 to 11."
+                )
 
         except ValueError as error:
             print(f"Error: {error}")
+
         except OSError as error:
             print(f"File operation failed: {error}")
 

@@ -272,9 +272,9 @@ class TicketManager:
         an unknown ticket, or a resolved ticket. A rejected note changes
         nothing, so it never uses up a note ID.
         """
+        ticket = self._get_ticket(ticket_id)
         author = v.validate_label(author, "Note author")
         message = v.validate_message(message)
-        ticket = self._get_ticket(ticket_id)
         if ticket["status"] == "resolved":
             raise ValueError("Reopen the resolved ticket before adding notes.")
 
